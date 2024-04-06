@@ -137,11 +137,20 @@ class File_Processor:
                 'filename_time': self.get_filename_metadata(),
                 'json': self.get_json_metadata()
             }
+            # if we're in a folder that contains a year, use this as a bad fallback time for the media
+            if self.year_hint:
+                year_hint_time = datetime.datetime(self.year_hint, 1, 1, 0, 0, 0, 0)
+            else:
+                year_hint_time = None
+            # choose a timestamp for the photo using these methods in preference order
             preferred_ts = (
                 results['exif']['datetime_exif'] or 
+                results['json']['datetime_json'] or
                 results['filename_time']['datetime_filename'] or
-                results['json']['datetime_json']
+                year_hint_time or
+                results['file_time']['datetime_filemodif']
             )
+            logging.debug("File_Processor : process_file - results: %s preferred_ts %s", results, preferred_ts)
             # come up with a proposed new name for the file
             destination = "{0}/{1:%Y}/{1:%Y}_{1:%m}/{1:%Y-%m-%d_%H%M%S}_{2}".format(self.output_folder, preferred_ts, self.source_media_basename)
             results['destination'] = destination
