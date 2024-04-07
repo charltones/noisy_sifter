@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+import shutil
 import exiftool
 import argparse
 import glob, os, re
@@ -167,16 +168,16 @@ class File_Processor:
             else:
                 year_hint_time = None
             # choose a timestamp for the photo using these methods in preference order
-            preferred_ts = (
+            results['preferred_ts'] = (
                 results['exif']['datetime_exif'] or 
                 results['json']['datetime_json'] or
                 results['filename_time']['datetime_filename'] or
                 year_hint_time or
                 results['file_time']['datetime_filemodif']
             )
-            logging.debug("File_Processor : process_file - results: %s preferred_ts %s", results, preferred_ts)
+            logging.debug("File_Processor : process_file - results: %s preferred_ts %s", results, results['preferred_ts'])
             # come up with a proposed new name for the file
-            destination = "{0}/{1:%Y}/{1:%Y}_{1:%m}/{1:%Y-%m-%d_%H%M%S}_{2}".format(self.output_folder, preferred_ts, self.source_media_basename)
+            destination = "{0}/{1:%Y}/{1:%Y}_{1:%m}/{1:%Y-%m-%d_%H%M%S}_{2}".format(self.output_folder, results['preferred_ts'], self.source_media_basename)
             results['destination'] = destination
             return results
         elif is_json(self.source_media_fileext):
@@ -454,13 +455,29 @@ class Media_Sifter:
 
     def enact_report(self):
         # Use the hashmap report to actually copy and update files to their new destination
-        # For each line in the report:
-        # - Check if the output file already exists
-        # - <maybe> If the file already exists, do a simplistic check to see if it is the same file contents
-        # - If the filename isn't unique, add some uniqueness to the filename
-        # - Copy the file from source to destination, creating any missing folders in the path
-        # - Update the file modification timestamp
-        # - Update missing exif data if needed
+        for source in self.report:
+            logging.debug("Media_Sifter : enact_report - %s", source)
+            if 'destination' in self.report[source]:
+                destination = self.report[source]['destination']
+                if os.path.isfile(source):
+                    # if the source file exists, copy it to the destination
+                    # check if the destination file exists
+                    if os.path.isfile(destination):
+                        # - <maybe> If the file already exists, do a simplistic check to see if it is the same file contents
+                        # - if the destination file exists, check if it is the same file contents
+                        # - if the destination file exists and is different, rename it to a numbered backup
+                        logging.warning("Media_Sifter : enact_report - destination file %s exists", destination)
+                        pass
+                    else:
+                        # Copy the file from source to destination, creating any missing folders in the path
+                        logging.info("Media_Sifter : enact_report - copying %s to %s", source, destination)
+                        os.makedirs(os.path.dirname(destination), exist_ok=True)
+                        shutil.copy(source, destination)                        
+                        
+                        # Update the file modification timestamp
+                        os.utime(destination, (self.report[source]['preferred_ts'], self.report[source]['preferred_ts']))
+
+        # - <todo> Update missing exif data if needed
         pass
 
 parser = argparse.ArgumentParser(
