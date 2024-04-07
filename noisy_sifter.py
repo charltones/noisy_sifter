@@ -59,6 +59,26 @@ class File_Processor:
         self.year_hint = year
         self.output_folder = outfolder
 
+    def exif_gps_helper(self, d):
+        '''
+            Helper function to extract GPS data from exif data.
+        '''
+        result = {
+            'latitude': None,
+            'longitude': None
+        }
+        if 'EXIF:GPSLatitude' in d:
+            if 'EXIF:GPSLatitudeRef' in d:
+                result['latitude'] = d['EXIF:GPSLatitude'] if d['EXIF:GPSLatitudeRef']=='N' else -1 * d['EXIF:GPSLatitude']
+            else:
+                result['latitude'] = d['EXIF:GPSLatitude']
+        if 'EXIF:GPSLongitude' in d:
+            if 'EXIF:GPSLongitudeRef' in d:
+                result['longitude'] = d['EXIF:GPSLongitude'] if d['EXIF:GPSLongitudeRef']=='E' else -1 * d['EXIF:GPSLongitude']
+            else:
+                result['longitude'] = d['EXIF:GPSLongitude']
+        return result
+        
     def get_exif_metadata(self):
         metadata_exif = {
             'datetime_exif': None,
@@ -76,11 +96,7 @@ class File_Processor:
                     metadata_exif['datetime_exif'] = find_date(d['EXIF:DateTimeOriginal'])                    
                 elif 'QuickTime:CreateDate' in d:
                     metadata_exif['datetime_exif'] = find_date(d['QuickTime:CreateDate'])
-                if 'EXIF:GPSLatitude' in d:
-                    metadata_exif['geodata_exif'] = {
-                        'latitude': d['EXIF:GPSLatitude'] if d['EXIF:GPSLatitudeRef']=='N' else -1 * d['EXIF:GPSLatitude'],
-                        'longitude': d['EXIF:GPSLongitude'] if d['EXIF:GPSLongitudeRef']=='E' else -1 * d['EXIF:GPSLongitude'],
-                    }
+                metadata_exif['geodata_exif'] = self.exif_gps_helper(d)
                 if 'EXIF:Model' in d:
                     metadata_exif['model_exif'] = d['EXIF:Model']
         return metadata_exif
@@ -236,7 +252,7 @@ class JSON_Mapper:
                     self.target_media_filename_truncated =  self.target_media_filename.replace('\'', '_')[:47]+self.target_media_fileext
 
         if self.target_media_filename_truncated not in self.mapper:
-            # save the media file in the mapper - this is the happy path complete
+            # we failed to make a match - log an error
             logging.error("JSON_Mapper : process_jason_basename_match - media file not found %s", self.target_media_filename_truncated)
 
     def process_json_basename_mismatch(self):
@@ -330,37 +346,81 @@ class JSON_Mapper:
             logging.debug("JSON_Mapper : process_json - basename mismatch %s", self.json_basename_noext)
             self.process_json_basename_mismatch()
 
+class Media_Sifter:
+    '''
+        Class to manage the high level media sifting process. Given a top level folder, an
+        output folder and a report name, it will recursively process all folders of media 
+        within the input, generating a json report file that proposes what file changes
+        should be made and metadata used to copy the input to the output.
+    '''
+    def __init__(self, input_folder, output_folder, report_filename):
+        self.input_folder = input_folder
+        self.output_folder = output_folder
+        self.report_filename = report_filename
+        self.report = {}
 
-def sift_media(infolder, outfolder, report):
-    # Open report file as a json for writing
-    with open(report, 'w') as json_fh:
-        json_fh.write('[\n')
-        # recurse over all subdirectories
+    def sift_media_in_subfolder(self):
+        logging.info("Media_Sifter : sift_media_in_subfolder - Processing folder %s", self.current_folder)
+
         match_year_in_folder_name = re.compile(r".*/.*([12]\d\d\d)$", re.I)
-        for search_path in glob.iglob(infolder + '/**', recursive=False):
-            if os.path.isdir(search_path): # filter dirs
-                match = match_year_in_folder_name.match(search_path)
-                if match:
-                    year = int(match.group(1))
-                else:
-                    year = None
+        match = match_year_in_folder_name.match(self.current_folder)
+        if match:
+            year = int(match.group(1))
+        else:
+            year = None
 
-                logging.info("sift_media - Processing folder %s, year %s", search_path, year)
-                
-                # Before we do anything, create a mapping of all json files to image files
-                # resolving any conflicts as we go
-                mapper_maker = JSON_Mapper(search_path)
-                json_mapper = mapper_maker.create_mapper()
+        # Before we do anything, create a mapping of all json files to image files
+        # in the current folder, resolving any conflicts as we go
+        mapper_maker = JSON_Mapper(self.current_folder)
+        json_mapper = mapper_maker.create_mapper()
 
-                processor = File_Processor(json_mapper, year, outfolder)
+        processor = File_Processor(json_mapper, year, self.output_folder)
 
-                #   for each photo or video file supported:
-                for source_file in glob.iglob(search_path + "//*", recursive=False):
-                    results = processor.process_file(source_file)
-                    if results:
-                        logging.debug("sift_media - %s", results)
-                        json_fh.write(json.dumps(results, default=str)+',\n')
-                        json_fh.flush()
+        #   for each photo or video file supported:
+        for source_file in glob.iglob(self.current_folder + "//*", recursive=False):
+            if source_file in self.report:
+                logging.debug("Media_Sifter : sift_media_in_subfolder - skipping %s", source_file)
+                continue    
+            results = processor.process_file(source_file)
+            if results:
+                logging.debug("Media_Sifter : sift_media_in_subfolder - %s", results)
+                self.report[source_file] = results
+                self.json_fh.write(json.dumps(results, default=str)+',\n')
+                self.json_fh.flush()
+
+    def read_report(self):
+        report = []
+        if os.path.isfile(self.report_filename):
+            with open(self.report_filename) as json_fh:
+                report = json.load(json_fh)
+        for entry in report:
+            self.report[entry['source']] = entry
+    
+    def sift_media(self):
+        # If the report file already exists, read the contents into a hashmap using the source element as the key.
+        # Then use this hashmap to skip files already processed.
+        self.read_report()
+
+        # Open report file as a json for writing - append mode
+        with open(self.report_filename, 'a') as self.json_fh:
+            self.json_fh.write('[\n')
+            # recurse over all subdirectories
+            for search_path in glob.iglob(self.input_folder + '/**', recursive=True):
+                if os.path.isdir(search_path): # filter dirs
+                    self.current_folder = search_path
+                    self.sift_media_in_subfolder()
+            self.json_fh.write(']\n')
+
+    def enact_report(self):
+        # Use the hashmap report to actually copy and update files to their new destination
+        # For each line in the report:
+        # - Check if the output file already exists
+        # - <maybe> If the file already exists, do a simplistic check to see if it is the same file contents
+        # - If the filename isn't unique, add some uniqueness to the filename
+        # - Copy the file from source to destination, creating any missing folders in the path
+        # - Update the file modification timestamp
+        # - Update missing exif data if needed
+        pass
 
 parser = argparse.ArgumentParser(
                     prog='takeout_fixer_sifter',
@@ -377,18 +437,7 @@ if args.debug:
 else:
     logging.getLogger().setLevel(logging.INFO)
 
-# Carry out two passes:
-# - one, sort through the data and generate a log file report containing a generated hashmap
-# - two, read the hashmap and carry out the required copying and renaming operations
-# this allows us to restart stopped processes and re-read the generated report
-# report is csv for simplicity, containing:
-# - original filename - relative path including infolder
-# - original file modified time
-# - original file exif date
-# - original file exif lat, long
-# - original file filename date (extracted from filename)
-# - original file json date (extracted from json)
-# - original file json latlong (extracted from json)
-# - any significant errors found
-# - proposed new output filename - relative path including outfolder
-sift_media(args.infolder, args.outfolder, args.report)
+sifter = Media_Sifter(args.infolder, args.outfolder, args.report)
+sifter.sift_media()
+if not args.dryrun:
+    sifter.enact_report()   
