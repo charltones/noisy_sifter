@@ -8,9 +8,17 @@ import json
 import datetime
 import sys
 import logging
+import logging.handlers
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', filename='noisy_sifter.log', level=logging.DEBUG)
-logging.getLogger().addHandler(logging.StreamHandler())
+logging.basicConfig(
+    handlers=[
+        logging.handlers.RotatingFileHandler('noisy_sifter.log', maxBytes=2000000, backupCount=10),
+        logging.StreamHandler()
+    ],
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.DEBUG
+)
             
 ext_exif = ['.jpg', '.jpeg', '.heic', '.3gp', '.avi', '.bmp', '.tif', '.tiff', '.pef', '.mov', '.m4v', '.png', '.gif',
              '.mp4', '.nef', '.dng', '.psd']
@@ -188,6 +196,12 @@ class JSON_Mapper:
         self.input_folder = input_folder
         self.mapper = {}
 
+    def is_a_metadata_sidecar(self):
+        for required in ['title', 'description', 'imageViews']:
+            if required not in self.json_document:
+                return False
+        return True
+    
     def create_mapper(self):
         # find all json files in the specified input folder
         # open the file and read the details into a hashmap
@@ -197,11 +211,7 @@ class JSON_Mapper:
             self.json_filename = json_filename
             self.json_basename = os.path.basename(json_filename)
             self.json_basename_noext, self.json_fileext = os.path.splitext(self.json_basename)
-             # We're not interested in metadata*.json
-            if re.match(r"metadata.*", self.json_basename):
-                pass
-            else:
-                self.process_json()
+            self.process_json()
         return self.mapper
 
     def process_target_media_filename(self):
@@ -333,7 +343,11 @@ class JSON_Mapper:
         # Open the json file and read it
         with open(self.json_filename) as f:
             self.json_document = json.load(f)
-            logging.debug("JSON_Mapper : process_json - json doc %s", self.json_document)
+            if self.is_a_metadata_sidecar():
+                logging.debug("JSON_Mapper : process_json - json doc %s", self.json_document)
+            else:
+                logging.debug("JSON_Mapper : process_json - skipping json doc %s", self.json_document)
+                return
         # Perform various manipulations on the target media filename from the json
         self.process_target_media_filename()
         # Normally the json basename (input_file.jpg.json with .json removed) should simply
@@ -378,6 +392,9 @@ class Media_Sifter:
 
         #   for each photo or video file supported:
         for source_file in glob.iglob(self.current_folder + "//*", recursive=False):
+            if os.path.isdir(source_file): # filter dirs
+                continue
+
             if source_file in self.report:
                 logging.debug("Media_Sifter : sift_media_in_subfolder - skipping %s", source_file)
                 continue    
@@ -388,13 +405,31 @@ class Media_Sifter:
                 self.json_fh.write(json.dumps(results, default=str)+',\n')
                 self.json_fh.flush()
 
+    def get_backup_filename(self, input_file):
+        # create a backup filename by appending a number to the end of the input file name
+        # until we find a filename that doesn't exist
+        backup_filename = input_file
+        backup_number = 1
+        base, extension = os.path.splitext(backup_filename)
+        while os.path.isfile(backup_filename):
+            backup_filename = base + '(' + str(backup_number) + ')' + extension
+            backup_number += 1
+        return backup_filename
+    
     def read_report(self):
+        # if the report already exists, read its contents, then move it to a numbered backup
         report = []
         if os.path.isfile(self.report_filename):
+            logging.info("Media_Sifter : read_report - reading existing report file %s", self.report_filename)
             with open(self.report_filename) as json_fh:
                 report = json.load(json_fh)
-        for entry in report:
-            self.report[entry['source']] = entry
+            for entry in report:
+                if 'source' in entry:
+                    self.report[entry['source']] = entry
+            # move the report file to a numbered backup
+            backup_filename = self.get_backup_filename(self.report_filename)
+            logging.info("Media_Sifter : read_report - backing up existing report file %s", backup_filename)
+            os.rename(self.report_filename, backup_filename)        
     
     def sift_media(self):
         # If the report file already exists, read the contents into a hashmap using the source element as the key.
@@ -404,12 +439,18 @@ class Media_Sifter:
         # Open report file as a json for writing - append mode
         with open(self.report_filename, 'a') as self.json_fh:
             self.json_fh.write('[\n')
+            if len(self.report) != 0:
+                # if the report file already exists, we need to write out all the existing report entries
+                logging.debug("Media_Sifter : sift_media - writing existing report entries")
+                for entry in self.report:
+                    self.json_fh.write(json.dumps(self.report[entry], default=str)+', \n')  
+                self.json_fh.flush()
             # recurse over all subdirectories
             for search_path in glob.iglob(self.input_folder + '/**', recursive=True):
                 if os.path.isdir(search_path): # filter dirs
                     self.current_folder = search_path
                     self.sift_media_in_subfolder()
-            self.json_fh.write(']\n')
+            self.json_fh.write('{}]\n')
 
     def enact_report(self):
         # Use the hashmap report to actually copy and update files to their new destination
