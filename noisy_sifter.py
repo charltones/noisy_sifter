@@ -1,5 +1,8 @@
 #!/usr/bin/python3
 
+from PIL import Image
+import imagehash
+import videohash
 import shutil
 import exiftool
 import argparse
@@ -10,19 +13,24 @@ import datetime
 import sys
 import logging
 import logging.handlers
+from pillow_heif import register_heif_opener
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     handlers=[
-        logging.handlers.RotatingFileHandler('noisy_sifter.log', maxBytes=2000000, backupCount=10),
+        logging.handlers.RotatingFileHandler('noisy_sifter.log', maxBytes=75000000, backupCount=10),
         logging.StreamHandler()
     ],
     format='%(asctime)s - %(levelname)s - %(message)s',
     level=logging.DEBUG
 )
-            
-ext_exif = ['.jpg', '.jpeg', '.heic', '.3gp', '.avi', '.bmp', '.tif', '.tiff', '.pef', '.mov', '.m4v', '.png', '.gif',
-             '.mp4', '.nef', '.dng', '.psd']
+# Allow PIL to open HEIC files
+register_heif_opener()
+
+ext_video = ['.3gp', '.avi', '.mov', '.m4v', '.mp4']
+ext_image_PIL = ['.jpg', '.jpeg', '.heic', '.bmp', '.tif', '.tiff', '.png', '.gif']
+ext_non_PIL = ['.nef', '.dng', '.psd', '.pef']
 ext_json = ['.json']
 
 def find_date(instr):
@@ -49,10 +57,22 @@ def find_date(instr):
     return None
 
 def is_exif(ext):
-    return ext.lower() in ext_exif
+    return is_image(ext) or is_video(ext)
+
+def is_video(ext):
+    return ext.lower() in ext_video
+
+def is_image(ext):
+    return is_image_PIL(ext) or is_non_PIL(ext)
+
+def is_image_PIL(ext):
+    return ext.lower() in ext_image_PIL
+
+def is_non_PIL(ext):
+    return ext.lower() in ext_non_PIL
 
 def is_json(ext):
-    return ext in ext_json
+    return ext.lower() in ext_json
 
 class File_Processor:
     '''
@@ -148,7 +168,22 @@ class File_Processor:
         else:
             logger.warning("File_Processor : get_json_metadata - No json file for %s", self.source_media_filename)
         return metadata_json    
+    
+    def get_hash(self):
+        if is_image_PIL(self.source_media_fileext):
+            return self.get_image_hash()
+        elif is_video(self.source_media_fileext):
+            return None
+            #return self.get_video_hash()
+        else:
+            return None
 
+    def get_video_hash(self):
+        return videohash.VideoHash(path=self.source_media_filename).hash_hex
+
+    def get_image_hash(self):        
+        return imagehash.phash(Image.open(self.source_media_filename))
+    
     def process_file(self, source):
         self.source_media_filename = source
         self.source_media_basename = os.path.basename(source)
@@ -160,6 +195,7 @@ class File_Processor:
                 'exif': self.get_exif_metadata(),
                 'file_time': self.get_file_metadata(),
                 'filename_time': self.get_filename_metadata(),
+                'hash': self.get_hash(),
                 'json': self.get_json_metadata()
             }
             # if we're in a folder that contains a year, use this as a bad fallback time for the media
@@ -373,6 +409,7 @@ class Media_Sifter:
         self.output_folder = output_folder
         self.report_filename = report_filename
         self.report = {}
+        self.hasher = {}
 
     def sift_media_in_subfolder(self):
         logging.info("Media_Sifter : sift_media_in_subfolder - Processing folder %s", self.current_folder)
@@ -403,6 +440,14 @@ class Media_Sifter:
             if results:
                 logging.debug("Media_Sifter : sift_media_in_subfolder - %s", results)
                 self.report[source_file] = results
+                if results['hash'] is not None:
+                    if results['hash'] in self.hasher:
+                        logging.warning("Media_Sifter : sift_media_in_subfolder - hash collision %s %s clashes with %s",
+                                        results['hash'], self.hasher[results['hash']], source_file)
+                    else:    
+                        self.hasher[results['hash']] = source_file
+                else:
+                    logging.warning("Media_Sifter : sift_media_in_subfolder - unhashable %s", source_file)
                 self.json_fh.write(json.dumps(results, default=str)+',\n')
                 self.json_fh.flush()
 
@@ -427,6 +472,16 @@ class Media_Sifter:
             for entry in report:
                 if 'source' in entry:
                     self.report[entry['source']] = entry
+                    if 'hash' in entry and entry['hash'] is not None:
+                        if entry['hash'] in self.hasher:
+                            logging.warning("Media_Sifter : read_report - hash collision %s %s clashes with %s",
+                                             entry['hash'], self.hasher[entry['hash']], entry['source'])
+                        else:    
+                            self.hasher[entry['hash']] = entry['source']
+                    else:
+                        logging.warning("Media_Sifter : read_report - null or missing hash %s",
+                                            entry['source'])
+
             # move the report file to a numbered backup
             backup_filename = self.get_backup_filename(self.report_filename)
             logging.info("Media_Sifter : read_report - backing up existing report file %s", backup_filename)
