@@ -1,6 +1,5 @@
 from PIL import Image
 import imagehash
-import videohash
 import exiftool
 import logging
 import json
@@ -123,6 +122,11 @@ class File_Processor:
             'datetime_filemodif': datetime.datetime.fromtimestamp(os.path.getmtime(self.source_media_filename)),
         }
 
+    def read_json_file(self, json_filename):
+        with open(json_filename) as f:
+            d = json.load(f)
+        return d
+    
     def get_json_metadata(self):
         # Look for a matching json file
         metadata_json = {
@@ -131,8 +135,7 @@ class File_Processor:
         }
         if self.source_media_basename in self.json_mapper:
             json_filename = os.path.dirname(self.source_media_filename)+"/"+self.json_mapper[self.source_media_basename]
-            with open(json_filename) as f:
-                d = json.load(f)
+            d = self.read_json_file(json_filename)
             # do some sense checks on the json data
             if 'photoTakenTime' in d:
                 datetime_ts_json = d['photoTakenTime']['timestamp']
@@ -159,8 +162,8 @@ class File_Processor:
         else:
             return None
 
-    def get_video_hash(self):
-        return videohash.VideoHash(path=self.source_media_filename).hash_hex
+    #def get_video_hash(self):
+    #    return videohash.VideoHash(path=self.source_media_filename).hash_hex
 
     def get_image_hash(self):        
         # Experimenting with different hash sizes and types. Average hash produced a lot of 
