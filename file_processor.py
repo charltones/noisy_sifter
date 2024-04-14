@@ -95,8 +95,6 @@ class File_Processor:
             'model_exif': None
         }
         # Look for exif data already existing
-        datetime_exif = None
-        datetimestring_exif = None
         with exiftool.ExifToolHelper() as et:
             metadata = et.get_metadata(self.source_media_filename)
             logging.debug("File_Processor : get_exif_metadata - %s", metadata)
