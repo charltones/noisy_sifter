@@ -2,8 +2,11 @@ import glob
 import os
 import re
 import logging
-import sys
 import json
+import sys
+
+class JSONMapperFatalException(Exception):
+    pass
 
 class JSON_Mapper:
     '''
@@ -98,9 +101,13 @@ class JSON_Mapper:
             # and count up so we're just going to have to live with that.
             base_numbering_file = m.group(1)
             # the target media file doesn't have truncated file extensions in it, but the json does!
-            m = re.match(r"^(.*)\.\w{1,2}$", self.target_media_filename_truncated)
+            m = re.match(r"^(.*)(\.\w{1,2})$", self.target_media_filename_truncated)
             if m:
+                logging.debug("target media file doesn't have truncated file extensions in it, but the json does! %s", self.target_media_filename_truncated)
                 self.target_media_filename_truncated = m.group(1)
+                self.target_media_fileext_for_json = m.group(2)
+            else:
+                self.target_media_fileext_for_json = self.target_media_fileext
             if self.add_file_extension:
                 self.target_media_filename_truncated += self.target_media_fileext
 
@@ -110,14 +117,14 @@ class JSON_Mapper:
                 for index in range(20):
                     if index==0:
                         checkm = base_numbering_file+self.target_media_fileext
-                        checkj = base_numbering_file+self.target_media_fileext+self.json_fileext
+                        checkj = base_numbering_file+self.target_media_fileext_for_json+self.json_fileext
                     else:
                         checkm = "{}({}){}".format(base_numbering_file,index,self.target_media_fileext)
-                        checkj = "{}{}({}){}".format(base_numbering_file,self.target_media_fileext,index+joffset,self.json_fileext)
+                        checkj = "{}{}({}){}".format(base_numbering_file,self.target_media_fileext_for_json,index+joffset,self.json_fileext)
                     media_exists = os.path.isfile(self.input_folder+'/'+checkm)
                     json_exists = os.path.isfile(self.input_folder+'/'+checkj)
                     if media_exists and json_exists:
-                        checkj2 = "{}({}){}{}".format(base_numbering_file,index,self.target_media_fileext,self.json_fileext)
+                        checkj2 = "{}({}){}{}".format(base_numbering_file,index,self.target_media_fileext_for_json,self.json_fileext)
                         json2_exists = os.path.isfile(self.input_folder+'/'+checkj2)
                         if json2_exists:
                             # if there was actually a media file uploaded called image(1).ext and google wants to write a second
@@ -143,20 +150,19 @@ class JSON_Mapper:
                             # We've found a bug somewhere, because we started this little odyssey with a file with a nummbered extension, but failed
                             # to find the zeroth example. Stop, look, debug.
                             logging.error("JSON_Mapper : process_jason_basename_mismatch - Numbered file fail at zero %d %s %s", index, self.json_basename_noext, self.target_media_filename_truncated, checkj, checkm)
-                            sys.exit(1)
+                            raise JSONMapperFatalException
                         # This is the expected path when we reach the end of the file numbering fun - we run out of files and go back to work
                         #logging.debug("Numbered file break at %d %s", index, base_numbering_file)
                         break
-
             else:
                 # if we remove the (1) numbering from the file, and we still don't match what is in the json file
                 # this is a bug that needs investigation so stop
                 logging.error("JSON_Mapper : process_jason_basename_mismatch - Numbered MISMATCH json %s with target %s %s %s", self.json_basename_noext, self.target_media_filename, base_numbering_file, self.target_media_filename_truncated)
-                sys.exit(1)
+                raise JSONMapperFatalException
             pass
         else:
             logging.error("JSON_Mapper : process_jason_basename_mismatch - Mismatch json %s with target %s", self.json_basename_noext, self.target_media_filename)
-            sys.exit(1)
+            raise JSONMapperFatalException
 
     def process_json(self):
         # Open the json file and read it
@@ -176,5 +182,5 @@ class JSON_Mapper:
             self.process_json_basename_match()
         else:
             # But there are lots of cases where this simply isn't true
-            logging.debug("JSON_Mapper : process_json - basename mismatch %s", self.json_basename_noext)
+            logging.debug("JSON_Mapper : process_json - basename mismatch %s with %s", self.json_basename_noext, self.target_media_filename_truncated)
             self.process_json_basename_mismatch()
