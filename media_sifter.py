@@ -4,7 +4,7 @@ import glob
 import json
 import shutil
 import logging
-from json_mapper import JSON_Mapper
+from json_mapper import JSON_Mapper, JSONMapperFatalException
 from file_processor import File_Processor
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,11 @@ class Media_Sifter:
         # Before we do anything, create a mapping of all json files to image files
         # in the current folder, resolving any conflicts as we go
         mapper_maker = JSON_Mapper(self.current_folder)
-        json_mapper = mapper_maker.create_mapper()
+        try:
+            json_mapper = mapper_maker.create_mapper()
+        except JSONMapperFatalException as e:
+            logging.error("Media_Sifter : sift_media_in_subfolder - fatal exception %s", e)
+            return
 
         processor = File_Processor(json_mapper, year, self.output_folder)
 
