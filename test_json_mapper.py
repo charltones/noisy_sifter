@@ -108,25 +108,22 @@ def test_create_mapper(fs, cwd, caplog):
           '1234567890123456789012345678901234567890123.jp.json'
           }
 
+def test_create_mapper_47_char_file_case(fs, cwd, caplog):
     # test media file with name > 46 chars where target media file has 47 chars randomly
-    long_file_json3 = """
+    long_file_json = """
 {
-  "title": "223456789012345678901234567890123456789012345678901.jpg",
+  "title": "original_fa7485b9-9574-4dd2-a7bd-74cbb1542c2e_20220522_182714.jpg",
   "description": "",
   "imageViews": "333"
 }
 """
-    fs.create_file("/my/path/2234567890123456789012345678901234567890123456.json", contents=long_file_json3)
-    fs.create_file("/my/path/22345678901234567890123456789012345678901234567.jpg")
+    fs.create_file("/my/path/original_fa7485b9-9574-4dd2-a7bd-74cbb1542c2e_.json", contents=long_file_json)
+    fs.create_file("/my/path/original_fa7485b9-9574-4dd2-a7bd-74cbb1542c2e_2.jpg")
+    jm = json_mapper.JSON_Mapper('/my/path')
     mpr = jm.create_mapper()
     assert mpr == {
-        'image.jpg': 'image.jpg.json',
-        '1234567890123456789012345678901234567890123456.jpg':
-          '1234567890123456789012345678901234567890123456.json',
-        '1234567890123456789012345678901234567890123.jpg':
-          '1234567890123456789012345678901234567890123.jp.json',
-        '22345678901234567890123456789012345678901234567.jpg':
-          '2234567890123456789012345678901234567890123456.json'
+        'original_fa7485b9-9574-4dd2-a7bd-74cbb1542c2e_2.jpg':
+          'original_fa7485b9-9574-4dd2-a7bd-74cbb1542c2e_.json'
           }
 
 def test_create_mapper_numbered_cases(fs, cwd, caplog):
@@ -275,7 +272,7 @@ def test_create_mapper_clash_entry(fs, cwd, caplog):
         'image(2).jpg': 'image.jpg(2).json'
     }
 
-def test_create_mapper_lonf_filename_numbered(fs, cwd, caplog):
+def test_create_mapper_long_filename_numbered(fs, cwd, caplog):
 
     # test media file with name > 46 chars and number index with interrupted file extension
     long_file_json1 = """

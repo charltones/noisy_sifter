@@ -4,6 +4,7 @@ import glob
 import json
 import shutil
 import logging
+import traceback
 from json_mapper import JSON_Mapper, JSONMapperFatalException
 from file_processor import File_Processor
 
@@ -37,11 +38,7 @@ class Media_Sifter:
         # Before we do anything, create a mapping of all json files to image files
         # in the current folder, resolving any conflicts as we go
         mapper_maker = JSON_Mapper(self.current_folder)
-        try:
-            json_mapper = mapper_maker.create_mapper()
-        except JSONMapperFatalException as e:
-            logging.error("Media_Sifter : sift_media_in_subfolder - fatal exception %s", e)
-            return
+        json_mapper = mapper_maker.create_mapper()
 
         processor = File_Processor(json_mapper, year, self.output_folder)
 
@@ -127,10 +124,20 @@ class Media_Sifter:
                     self.json_fh.write(json.dumps(self.report[entry], default=str)+', \n')  
                 self.json_fh.flush()
             # recurse over all subdirectories
-            for search_path in glob.iglob(self.input_folder + '/**', recursive=True):
-                if os.path.isdir(search_path): # filter dirs
-                    self.current_folder = search_path
-                    self.sift_media_in_subfolder()
+            try:
+                for search_path in glob.iglob(self.input_folder + '/**', recursive=True):
+                    if os.path.isdir(search_path): # filter dirs
+                        self.current_folder = search_path
+                        self.sift_media_in_subfolder()
+            except JSONMapperFatalException as e:
+                logging.error("Media_Sifter : sift_media - fatal exception in json mapper to investigate %s", e)
+                logging.error(traceback.format_exc())
+            except KeyboardInterrupt:
+                logging.error("Media_Sifter : sift_media - Keyboard Interrupt - stopping")
+            except Exception as e:
+                logging.error("Media_Sifter : sift_media - other exception %s", e)
+                logging.error(traceback.format_exc())
+            # Make sure to properly close the json file
             self.json_fh.write('{}]\n')
 
     def clean_destinations(self, destinations):
