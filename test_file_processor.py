@@ -256,7 +256,7 @@ def test_json_metadata(monkeypatch):
         }
           
     # test that when there is a matching json mapper we get the correct metadata back
-    File_Processor.read_json_file = mock_read_json_file
+    monkeypatch.setattr(File_Processor, "read_json_file", mock_read_json_file)
     fp = File_Processor(mapper, year, outfolder)
     fp.source_media_filename = "sponge/bobbins20120901_114223_edited.jpg"
     fp.source_media_basename = "bobbins20120901_114223_edited.jpg"
@@ -281,7 +281,7 @@ def test_json_metadata(monkeypatch):
         }
           
     # test that when there is a matching json mapper we get the correct metadata back
-    File_Processor.read_json_file = mock_read_json_file2
+    monkeypatch.setattr(File_Processor, "read_json_file", mock_read_json_file2)
     fp = File_Processor(mapper, year, outfolder)
     fp.source_media_filename = "sponge/bobbins20120901_114223_edited.jpg"
     fp.source_media_basename = "bobbins20120901_114223_edited.jpg"
@@ -304,7 +304,7 @@ def test_json_metadata(monkeypatch):
         }
           
     # test that when there is a matching json mapper we get the correct metadata back
-    File_Processor.read_json_file = mock_read_json_file3
+    monkeypatch.setattr(File_Processor, "read_json_file", mock_read_json_file3)
     fp = File_Processor(mapper, year, outfolder)
     fp.source_media_filename = "sponge/bobbins20120901_114223_edited.jpg"
     fp.source_media_basename = "bobbins20120901_114223_edited.jpg"
@@ -416,11 +416,11 @@ def test_process_file(monkeypatch):
             return {
                 'datetime_json': None,
             }
-    File_Processor.get_exif_metadata = mock_get_exif_metadata
-    File_Processor.get_file_metadata = mock_get_file_metadata
-    File_Processor.get_filename_metadata = mock_get_filename_metadata
-    File_Processor.get_hash = mock_get_hash
-    File_Processor.get_json_metadata = mock_get_json_metadata
+    monkeypatch.setattr(File_Processor, "get_exif_metadata", mock_get_exif_metadata)
+    monkeypatch.setattr(File_Processor, "get_file_metadata", mock_get_file_metadata)
+    monkeypatch.setattr(File_Processor, "get_filename_metadata", mock_get_filename_metadata)
+    monkeypatch.setattr(File_Processor, "get_hash", mock_get_hash)
+    monkeypatch.setattr(File_Processor, "get_json_metadata", mock_get_json_metadata)
     fp = File_Processor(mapper, year, outfolder)
     # test 1 - exif data present
     assert fp.process_file("folder/test1.jpg") == {

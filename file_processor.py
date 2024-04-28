@@ -99,14 +99,17 @@ class File_Processor:
             with exiftool.ExifToolHelper() as et:
                 metadata = et.get_metadata(self.source_media_filename)
                 logging.debug("File_Processor : get_exif_metadata - %s", metadata)
-                for d in metadata:
-                    if 'EXIF:DateTimeOriginal' in d:
-                        metadata_exif['datetime_exif'] = find_date(d['EXIF:DateTimeOriginal'])                    
-                    elif 'QuickTime:CreateDate' in d:
-                        metadata_exif['datetime_exif'] = find_date(d['QuickTime:CreateDate'])
-                    metadata_exif['geodata_exif'] = self.exif_gps_helper(d)
-                    if 'EXIF:Model' in d:
-                        metadata_exif['model_exif'] = d['EXIF:Model']
+                if metadata:
+                    for d in metadata:
+                        if 'EXIF:DateTimeOriginal' in d:
+                            metadata_exif['datetime_exif'] = find_date(d['EXIF:DateTimeOriginal'])                    
+                        elif 'QuickTime:CreateDate' in d:
+                            metadata_exif['datetime_exif'] = find_date(d['QuickTime:CreateDate'])
+                        metadata_exif['geodata_exif'] = self.exif_gps_helper(d)
+                        if 'EXIF:Model' in d:
+                            metadata_exif['model_exif'] = d['EXIF:Model']
+                else:
+                    logging.warning("File_Processor : get_exif_metadata - No metadata for %s", self.source_media_filename)
         except exiftool.exceptions.ExifToolExecuteError as e:
             logging.error("File_Processor : get_exif_metadata - Error reading exif data for %s - %s",
                           self.source_media_filename, e)
@@ -208,7 +211,8 @@ class File_Processor:
                 results['json']['datetime_json'] or
                 results['filename_time']['datetime_filename'] or
                 year_hint_time or
-                results['file']['datetime_filemodif']
+                results['file']['datetime_filemodif'] or
+                datetime.datetime(1972,2,26,9,0,0,0)
             )
             logging.debug("File_Processor : process_file - results: %s preferred_ts %s", results, results['preferred_ts'])
             # come up with a proposed new name for the file
