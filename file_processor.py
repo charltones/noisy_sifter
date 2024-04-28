@@ -95,17 +95,21 @@ class File_Processor:
             'model_exif': None
         }
         # Look for exif data already existing
-        with exiftool.ExifToolHelper() as et:
-            metadata = et.get_metadata(self.source_media_filename)
-            logging.debug("File_Processor : get_exif_metadata - %s", metadata)
-            for d in metadata:
-                if 'EXIF:DateTimeOriginal' in d:
-                    metadata_exif['datetime_exif'] = find_date(d['EXIF:DateTimeOriginal'])                    
-                elif 'QuickTime:CreateDate' in d:
-                    metadata_exif['datetime_exif'] = find_date(d['QuickTime:CreateDate'])
-                metadata_exif['geodata_exif'] = self.exif_gps_helper(d)
-                if 'EXIF:Model' in d:
-                    metadata_exif['model_exif'] = d['EXIF:Model']
+        try:
+            with exiftool.ExifToolHelper() as et:
+                metadata = et.get_metadata(self.source_media_filename)
+                logging.debug("File_Processor : get_exif_metadata - %s", metadata)
+                for d in metadata:
+                    if 'EXIF:DateTimeOriginal' in d:
+                        metadata_exif['datetime_exif'] = find_date(d['EXIF:DateTimeOriginal'])                    
+                    elif 'QuickTime:CreateDate' in d:
+                        metadata_exif['datetime_exif'] = find_date(d['QuickTime:CreateDate'])
+                    metadata_exif['geodata_exif'] = self.exif_gps_helper(d)
+                    if 'EXIF:Model' in d:
+                        metadata_exif['model_exif'] = d['EXIF:Model']
+        except exiftool.exceptions.ExifToolExecuteError as e:
+            logging.error("File_Processor : get_exif_metadata - Error reading exif data for %s - %s",
+                          self.source_media_filename, e)
         return metadata_exif
 
     def get_filename_metadata(self):
@@ -118,6 +122,7 @@ class File_Processor:
         # read modification timestamp from candidate
         return {
             'datetime_filemodif': datetime.datetime.fromtimestamp(os.path.getmtime(self.source_media_filename)),
+            'file_size': os.path.getsize(self.source_media_filename)
         }
 
     def read_json_file(self, json_filename):
@@ -184,11 +189,14 @@ class File_Processor:
                 'source': self.source_media_filename,
                 'folder_year': self.year_hint,
                 'exif': self.get_exif_metadata(),
-                'file_time': self.get_file_metadata(),
+                'file': self.get_file_metadata(),
                 'filename_time': self.get_filename_metadata(),
                 'hash': self.get_hash(),
                 'json': self.get_json_metadata()
             }
+            # if the file size is zero, log an error
+            if results['file']['file_size'] == 0:
+                logging.error("File_Processor : process_file - Zero size file %s", self.source_media_filename)
             # if we're in a folder that contains a year, use this as a bad fallback time for the media
             if self.year_hint:
                 year_hint_time = datetime.datetime(self.year_hint, 1, 1, 0, 0, 0, 0)
@@ -200,7 +208,7 @@ class File_Processor:
                 results['json']['datetime_json'] or
                 results['filename_time']['datetime_filename'] or
                 year_hint_time or
-                results['file_time']['datetime_filemodif']
+                results['file']['datetime_filemodif']
             )
             logging.debug("File_Processor : process_file - results: %s preferred_ts %s", results, results['preferred_ts'])
             # come up with a proposed new name for the file

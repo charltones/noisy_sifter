@@ -101,6 +101,9 @@ class MockExiftoolHelper:
     # mock method always returns the data we pass in
     @staticmethod
     def get_metadata(test_data):
+        # if we pass in the zero file path, raise an error
+        if test_data == "/my/path/zero.jpg":
+            raise exiftool.exceptions.ExifToolExecuteError("exiftool error", "", "", "")
         return test_data
     
     def __init__(self):
@@ -109,6 +112,37 @@ class MockExiftoolHelper:
         return self
     def __exit__(self, exc_type, exc_value, traceback):
         pass
+
+@pytest.fixture
+def cwd(fs, monkeypatch):
+    fs.cwd = "/my/path"
+    monkeypatch.setenv("HOME", "/home/user")
+
+def test_zero_file_size(fs, cwd, caplog, monkeypatch):
+    # create a zero sized image to give exiftool a surprise
+    fs.create_file("/my/path/zero.jpg", contents=b"")
+    os.utime("/my/path/zero.jpg", times=(
+        datetime.datetime(1972, 1, 1, 0, 0, 0, 0).timestamp(),
+        datetime.datetime(1972, 1, 1, 0, 0, 0, 0).timestamp()
+        ))
+    # apply the monkeypatch for exiftool
+    monkeypatch.setattr(exiftool, "ExifToolHelper", MockExiftoolHelper)
+
+    mapper = {}
+    year = 2024
+    outfolder = "test"
+    fp = File_Processor(mapper, year, outfolder)
+    assert fp.process_file("/my/path/zero.jpg") == {
+        'destination': 'test/2024/2024_01/2024-01-01_000000_zero.jpg',
+        'exif': {'datetime_exif': None, 'geodata_exif': None, 'model_exif': None},
+        'file': {'datetime_filemodif': datetime.datetime(1972, 1, 1, 0, 0, 0, 0), 'file_size': 0},
+        'filename_time': {'datetime_filename': None},
+        'hash': None,
+        'json': {'datetime_json': None, 'geodata_json': None},
+        'preferred_ts': datetime.datetime(2024, 1, 1, 0, 0, 0, 0),
+        'source': '/my/path/zero.jpg',
+        'folder_year': 2024,
+    }
 
 def test_file_processor_get_exif_metadata(monkeypatch):
     mapper = {}
@@ -172,17 +206,25 @@ def test_file_metadata(monkeypatch):
     outfolder = "test"
 
     # mock the os.path.getmtime method to return whatever data is passed in
-    def mock_getmtime(filename):
-        return filename
+    def mock_getmtime(data):
+        return data['datetime']
+    # mock the os.path.getsize method to return whatever data is passed in
+    def mock_getsize(data):
+        return data['size']
     
-    # apply the monkeypatch for os.path.getmtime
+    # apply the monkeypatch for os.path.getmtime and os.path.getsize
     monkeypatch.setattr(os.path, "getmtime", mock_getmtime)
+    monkeypatch.setattr(os.path, "getsize", mock_getsize)
 
     fp = File_Processor(mapper, year, outfolder)
-    fp.source_media_filename = datetime.datetime(2023, 12, 1, 14, 1, 23, 0).timestamp()
+    fp.source_media_filename = {
+        'datetime': datetime.datetime(2023, 12, 1, 14, 1, 23, 0).timestamp(),
+        'size': 12345,
+    }
     md = fp.get_file_metadata()
     assert md == {
         'datetime_filemodif': datetime.datetime(2023, 12, 1, 14, 1, 23, 0),
+        'file_size': 12345,
     }
 
 def test_json_metadata(monkeypatch):
@@ -347,10 +389,12 @@ def test_process_file(monkeypatch):
         if self.source_media_filename == "folder/test5.jpg":
             return {
                 'datetime_filemodif': datetime.datetime(2023,12,5,14,1,23,0),
+                'file_size': 12345,
             }
         else:
             return {
                 'datetime_filemodif': None,
+                'file_size': None,
             }
     def mock_get_filename_metadata(self):
         if self.source_media_filename == "folder/test3.jpg":
@@ -385,8 +429,9 @@ def test_process_file(monkeypatch):
         'exif': {
                 'datetime_exif': datetime.datetime(2023,12,1,14,1,23,0),
             },
-        'file_time': {
+        'file': {
                 'datetime_filemodif': None,
+                'file_size': None,
             },
         'filename_time': {
                 'datetime_filename': None,
@@ -406,8 +451,9 @@ def test_process_file(monkeypatch):
         'exif': {
                 'datetime_exif': None,
             },
-        'file_time': {
+        'file': {
                 'datetime_filemodif': None,
+                'file_size': None,
             },
         'filename_time': {
                 'datetime_filename': None,
@@ -427,8 +473,9 @@ def test_process_file(monkeypatch):
         'exif': {
                 'datetime_exif': None,
             },
-        'file_time': {
+        'file': {
                 'datetime_filemodif': None,
+                'file_size': None,
             },
         'filename_time': {
                 'datetime_filename': datetime.datetime(2023,12,3,14,1,23,0),
@@ -448,8 +495,9 @@ def test_process_file(monkeypatch):
         'exif': {
                 'datetime_exif': None,
             },
-        'file_time': {
+        'file': {
                 'datetime_filemodif': None,
+                'file_size': None,
             },
         'filename_time': {
                 'datetime_filename': None,
@@ -470,8 +518,9 @@ def test_process_file(monkeypatch):
         'exif': {
                 'datetime_exif': None,
             },
-        'file_time': {
+        'file': {
                 'datetime_filemodif': datetime.datetime(2023,12,5,14,1,23,0),
+                'file_size': 12345,
             },
         'filename_time': {
                 'datetime_filename': None,
@@ -483,5 +532,4 @@ def test_process_file(monkeypatch):
         'preferred_ts': datetime.datetime(2023,12,5,14,1,23,0),
         'destination': 'test/2023/2023_12/2023-12-05_140123_test5.jpg'
     }
-
 
